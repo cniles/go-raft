@@ -9,10 +9,10 @@ import (
 type StateBehavior interface {
 	Entered(state *State)
 
-	RequestVote(args *service.RequestVoteArgs) (bool, int64)
-	RequestVoteReply(message peer.RequestVoteReplyMessage) int64
+	GrantedVote() int64
+	AppendEntries() int64
 
-	AppendEntries(args *service.AppendEntriesArgs) bool
+	RequestVoteReply(message peer.RequestVoteReplyMessage) int64
 	AppendEntriesReply(message peer.AppendEntriesReplyMessage) int64
 
 	Timeout() int64

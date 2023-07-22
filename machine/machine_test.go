@@ -11,7 +11,7 @@ import (
 type TestBehavior struct {
 	timeoutCh            chan struct{}
 	enteredCh            chan struct{}
-	requestVoteCh        chan struct{}
+	grantedVoteCh        chan struct{}
 	requestVoteReplyCh   chan struct{}
 	appendEntriesCh      chan struct{}
 	appendEntriesReplyCh chan struct{}
@@ -30,21 +30,21 @@ func (b *TestBehavior) Timeout() int64 {
 	return 0
 }
 
-func (b *TestBehavior) RequestVote(args *service.RequestVoteArgs) (bool, int64) {
-	b.requestVoteCh <- struct{}{}
-	return true, 0
-}
-
-func (b *TestBehavior) RequestVoteReply(voteGranted bool) int64 {
-	b.requestVoteReplyCh <- struct{}{}
+func (b *TestBehavior) GrantedVote() int64 {
+	b.grantedVoteCh <- struct{}{}
 	return 0
 }
 
-func (b *TestBehavior) AppendEntries(args *service.AppendEntriesArgs) bool {
+func (b *TestBehavior) AppendEntries() int64 {
 	b.appendEntriesCh <- struct{}{}
-	return false
+	return 0
 }
-func (b *TestBehavior) AppendEntriesReply(accepted bool) int64 {
+
+func (b *TestBehavior) RequestVoteReply(message peer.RequestVoteReplyMessage) int64 {
+	b.requestVoteReplyCh <- struct{}{}
+	return 0
+}
+func (b *TestBehavior) AppendEntriesReply(message peer.AppendEntriesReplyMessage) int64 {
 	b.appendEntriesReplyCh <- struct{}{}
 	return 0
 }
@@ -56,13 +56,14 @@ func TestMachine(t *testing.T) {
 		t.Fatal("Could not start agent: ", err)
 	}
 
-	replyCh1 := make(chan *service.RequestVoteReply)
-	replyCh2 := make(chan *service.AppendEntriesReply)
+	replyCh1 := make(chan peer.RequestVoteReplyMessage)
+	replyCh2 := make(chan peer.AppendEntriesReplyMessage)
+
 	peer := peer.MakePeer("localhost:9999", replyCh1, replyCh2)
 
 	timeoutCh := make(chan struct{})
 	enteredCh := make(chan struct{})
-	requestVoteCh := make(chan struct{})
+	grantedVoteCh := make(chan struct{})
 	requestVoteReplyCh := make(chan struct{})
 	appendEntriesCh := make(chan struct{})
 	appendEntriesReplyCh := make(chan struct{})
@@ -72,7 +73,7 @@ func TestMachine(t *testing.T) {
 		Endpoints:  []string{"localhost:9990"},
 		MinTimeout: 10,
 		MaxTimeout: 15,
-		Behaviors:  []state.StateBehavior{&TestBehavior{timeoutCh, enteredCh, requestVoteCh, requestVoteReplyCh, appendEntriesCh, appendEntriesReplyCh, nil}},
+		Behaviors:  []state.StateBehavior{&TestBehavior{timeoutCh, enteredCh, grantedVoteCh, requestVoteReplyCh, appendEntriesCh, appendEntriesReplyCh, nil}},
 	})
 
 	go peer.RequestVote(&service.RequestVoteArgs{Term: 1, CandidateId: "1", LastLogTerm: 1, LastLogIndex: 1})
@@ -97,7 +98,7 @@ func TestMachine(t *testing.T) {
 	result := 1
 	for i := 0; i < 4; i++ {
 		select {
-		case <-requestVoteCh:
+		case <-grantedVoteCh:
 			fmt.Println("Request vote")
 			result *= 2
 		case <-appendEntriesCh:

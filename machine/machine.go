@@ -17,6 +17,31 @@ type MachineConfig struct {
 	Behaviors  []state.StateBehavior
 }
 
+func requestVoteHandler(args *service.RequestVoteArgs, state state.State) *service.RequestVoteReply {
+	granted := false
+
+	if state.VotedFor == "" || state.VotedFor == args.CandidateId {
+		commitTerm := state.Log[state.CommitIndex].Term
+		if commitTerm <= args.LastLogTerm {
+			if commitTerm == args.LastLogTerm {
+				granted = args.LastLogIndex >= state.CommitIndex
+			}
+			if commitTerm < args.LastLogTerm {
+				granted = true
+			}
+		}
+	}
+
+	return &service.RequestVoteReply{
+		Term:        state.CurrentTerm,
+		VoteGranted: granted,
+	}
+}
+
+func appendEntriesHandler(args *service.AppendEntriesArgs, state state.State) *service.AppendEntriesReply {
+	return &service.AppendEntriesReply{}
+}
+
 func Run(config MachineConfig) chan struct{} {
 	done := make(chan struct{})
 	go func() {
@@ -66,15 +91,17 @@ func Run(config MachineConfig) chan struct{} {
 
 			select {
 			case r := <-serviceAgent.RequestVoteCh:
-				_, nextState = config.Behaviors[currentState].RequestVote(r.Args)
-				r.ReplyCh <- &service.RequestVoteReply{}
+				reply := requestVoteHandler(r.Args, state)
+				nextState = config.Behaviors[currentState].GrantedVote()
+				r.ReplyCh <- reply
 			case r := <-serviceAgent.AppendEntriesCh:
-				_ = config.Behaviors[currentState].AppendEntries(r.Args)
-				r.ReplyCh <- &service.AppendEntriesReply{}
+				reply := appendEntriesHandler(r.Args, state)
+				nextState = config.Behaviors[currentState].AppendEntries()
+				r.ReplyCh <- reply
 			case r := <-requestVoteReplyCh:
-				nextState = config.Behaviors[currentState].RequestVoteReply(r.VoteGranted)
+				nextState = config.Behaviors[currentState].RequestVoteReply(r)
 			case r := <-appendEntriesReplyCh:
-				nextState = config.Behaviors[currentState].AppendEntriesReply(r.Success)
+				nextState = config.Behaviors[currentState].AppendEntriesReply(r)
 			case <-timeout:
 				timeout = time.After(randomTimeout())
 				nextState = config.Behaviors[currentState].Timeout()

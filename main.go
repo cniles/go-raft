@@ -4,6 +4,7 @@ import (
 	"flag"
 	"math/rand"
 	"raft/machine"
+	"raft/state"
 	"strings"
 	"time"
 
@@ -104,7 +105,12 @@ func main() {
 		Endpoints:  endpoints,
 		MinTimeout: int64(*minTimeout),
 		MaxTimeout: int64(*maxTimeout),
+		Behaviors:  []state.StateBehavior{new(machine.Follower), new(machine.Candidate), new(machine.Leader)},
 	}
 
 	machine.Run(config)
+
+	for {
+
+	}
 }
