@@ -5,13 +5,23 @@ import (
 	"raft/service"
 )
 
-type Peer struct {
-	endpoint             string
-	requestVoteReplyCh   chan *service.RequestVoteReply
-	appendEntriesReplyCh chan *service.AppendEntriesReply
+type RequestVoteReplyMessage struct {
+	args  *service.RequestVoteArgs
+	reply *service.RequestVoteReply
 }
 
-func MakePeer(endpoint string, requestVoteReplyCh chan *service.RequestVoteReply, appendEntriesReplyCh chan *service.AppendEntriesReply) Peer {
+type AppendEntriesReplyMessage struct {
+	args  *service.AppendEntriesArgs
+	reply *service.AppendEntriesReply
+}
+
+type Peer struct {
+	endpoint             string
+	requestVoteReplyCh   chan RequestVoteReplyMessage
+	appendEntriesReplyCh chan AppendEntriesReplyMessage
+}
+
+func MakePeer(endpoint string, requestVoteReplyCh chan RequestVoteReplyMessage, appendEntriesReplyCh chan AppendEntriesReplyMessage) Peer {
 	return Peer{endpoint, requestVoteReplyCh, appendEntriesReplyCh}
 }
 
@@ -32,7 +42,7 @@ func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
 		break
 	}
 
-	p.requestVoteReplyCh <- reply
+	p.requestVoteReplyCh <- RequestVoteReplyMessage{args, reply}
 }
 
 func (p *Peer) AppendEntries(args *service.AppendEntriesArgs) {
@@ -52,5 +62,5 @@ func (p *Peer) AppendEntries(args *service.AppendEntriesArgs) {
 		break
 	}
 
-	p.appendEntriesReplyCh <- reply
+	p.appendEntriesReplyCh <- AppendEntriesReplyMessage{args, reply}
 }

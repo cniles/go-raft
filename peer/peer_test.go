@@ -14,7 +14,7 @@ func TestPeerRequestVote(t *testing.T) {
 		t.Fatal("listen error: ", err)
 	}
 
-	replyCh := make(chan *service.RequestVoteReply)
+	replyCh := make(chan RequestVoteReplyMessage)
 	peer := MakePeer("localhost:9999", replyCh, nil)
 
 	go peer.RequestVote(&service.RequestVoteArgs{Term: 1, CandidateId: "1", LastLogTerm: 1, LastLogIndex: 1})
@@ -34,7 +34,7 @@ func TestPeerAppendEntries(t *testing.T) {
 		t.Fatal("listen error: ", err)
 	}
 
-	replyCh := make(chan *service.AppendEntriesReply)
+	replyCh := make(chan AppendEntriesReplyMessage)
 	peer := MakePeer("localhost:9999", nil, replyCh)
 
 	go peer.AppendEntries(&service.AppendEntriesArgs{})
@@ -47,7 +47,7 @@ func TestPeerAppendEntries(t *testing.T) {
 }
 
 func TestPeerRetriesRequestVote(t *testing.T) {
-	replyCh := make(chan *service.RequestVoteReply)
+	replyCh := make(chan RequestVoteReplyMessage)
 	// simulate no connection
 	peer := MakePeer("localhost:9999", replyCh, nil)
 
@@ -70,7 +70,7 @@ func TestPeerRetriesRequestVote(t *testing.T) {
 
 func TestPeerRetriesRequestVote2(t *testing.T) {
 	// simulate server restart after connect
-	replyCh := make(chan *service.RequestVoteReply)
+	replyCh := make(chan RequestVoteReplyMessage)
 	peer := MakePeer("localhost:9999", replyCh, nil)
 	agent, err := service.RunAgent(9999)
 
@@ -98,7 +98,7 @@ func TestMultiplePeers(t *testing.T) {
 	agent, err := service.RunAgent(9999)
 	defer agent.Stop()
 
-	replyCh := make(chan *service.RequestVoteReply)
+	replyCh := make(chan RequestVoteReplyMessage)
 	peer1 := MakePeer("localhost:9999", replyCh, nil)
 	peer2 := MakePeer("localhost:9999", replyCh, nil)
 

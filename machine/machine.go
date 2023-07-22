@@ -32,8 +32,8 @@ func Run(config MachineConfig) chan struct{} {
 			Peers:       make([]peer.Peer, 0, peerCount),
 		}
 
-		requestVoteReplyCh := make(chan *service.RequestVoteReply)
-		appendEntriesReplyCh := make(chan *service.AppendEntriesReply)
+		requestVoteReplyCh := make(chan peer.RequestVoteReplyMessage)
+		appendEntriesReplyCh := make(chan peer.AppendEntriesReplyMessage)
 
 		for _, endpoint := range config.Endpoints {
 			state.NextIndex = append(state.NextIndex, state.CommitIndex+1)
