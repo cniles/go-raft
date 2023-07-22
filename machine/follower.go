@@ -1,6 +1,7 @@
 package machine
 
 import (
+	"log"
 	"raft/peer"
 	"raft/state"
 )
@@ -14,6 +15,7 @@ func (f *Follower) Entered(state *state.State) {
 	f.notTimedOut = false
 	f.state = state
 	state.VotedFor = ""
+	log.Println("Reverting to follower for term: ", state.CurrentTerm)
 }
 
 func (f *Follower) GrantedVote() int64 {
@@ -27,6 +29,7 @@ func (f *Follower) RequestVoteReply(message peer.RequestVoteReplyMessage) int64 
 
 func (f *Follower) AppendEntries() int64 {
 	f.notTimedOut = true
+	log.Println("Heartbeating received")
 	return 0
 }
 

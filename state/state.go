@@ -35,5 +35,5 @@ type State struct {
 
 	// The timeout channel to be read from
 	// when muxing in events.
-	TimeoutCh chan time.Time
+	TimeoutCh <-chan time.Time
 }

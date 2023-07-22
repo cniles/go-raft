@@ -17,7 +17,7 @@ type MachineConfig struct {
 	Behaviors  []state.StateBehavior
 }
 
-func requestVoteHandler(args *service.RequestVoteArgs, state state.State) *service.RequestVoteReply {
+func requestVoteHandler(args *service.RequestVoteArgs, state *state.State) *service.RequestVoteReply {
 	granted := false
 
 	if state.VotedFor == "" || state.VotedFor == args.CandidateId {
@@ -32,14 +32,21 @@ func requestVoteHandler(args *service.RequestVoteArgs, state state.State) *servi
 		}
 	}
 
+	if granted {
+		state.VotedFor = args.CandidateId
+	}
+
 	return &service.RequestVoteReply{
 		Term:        state.CurrentTerm,
 		VoteGranted: granted,
 	}
 }
 
-func appendEntriesHandler(args *service.AppendEntriesArgs, state state.State) *service.AppendEntriesReply {
-	return &service.AppendEntriesReply{}
+func appendEntriesHandler(args *service.AppendEntriesArgs, state *state.State) *service.AppendEntriesReply {
+	return &service.AppendEntriesReply{
+		Term:    state.CurrentTerm,
+		Success: false,
+	}
 }
 
 func Run(config MachineConfig) chan struct{} {
@@ -78,33 +85,74 @@ func Run(config MachineConfig) chan struct{} {
 			return time.Duration(timeout) * time.Millisecond
 		}
 
-		timeout := time.After(randomTimeout())
 		finished := false
 		currentState := int64(-1)
 		nextState := int64(0)
 
+		var changeState = func() {
+			log.Println("Switching to state: ", nextState)
+			currentState = nextState
+			config.Behaviors[currentState].Entered(&state)
+		}
+
 		for !finished {
 			if nextState != currentState {
-				log.Print("Switching to state: ", nextState)
-				currentState = nextState
-				config.Behaviors[currentState].Entered(&state)
+				changeState()
 			}
+
+			if state.TimeoutCh == nil {
+				log.Print("Timeout reset")
+				state.TimeoutCh = time.After(randomTimeout())
+			}
+
+			log.Printf("Muxing on state %d term %d leader %s\n", currentState, state.CurrentTerm, state.VotedFor)
 
 			select {
 			case r := <-serviceAgent.RequestVoteCh:
-				reply := requestVoteHandler(r.Args, state)
-				nextState = config.Behaviors[currentState].GrantedVote()
+				log.Println("Responding to request for vote from ", r.Args.CandidateId)
+				if r.Args.Term > state.CurrentTerm {
+					log.Println("Greater term than  ours")
+					state.CurrentTerm = r.Args.Term
+					nextState = 0
+					changeState()
+				}
+				reply := requestVoteHandler(r.Args, &state)
+				if reply.VoteGranted {
+					log.Println("Vote granted for term to: ", state.CurrentTerm, state.VotedFor)
+					nextState = config.Behaviors[currentState].GrantedVote()
+				}
 				r.ReplyCh <- reply
 			case r := <-serviceAgent.AppendEntriesCh:
-				reply := appendEntriesHandler(r.Args, state)
-				nextState = config.Behaviors[currentState].AppendEntries()
+				log.Println("Responding to AppendEntries from ", r.Args.LeaderId)
+				if r.Args.Term > state.CurrentTerm {
+					log.Println("Greater term than  ours")
+					state.CurrentTerm = r.Args.Term
+					nextState = 0
+					changeState()
+				}
+				reply := appendEntriesHandler(r.Args, &state)
+				if r.Args.Term == state.CurrentTerm {
+					nextState = config.Behaviors[currentState].AppendEntries()
+				}
 				r.ReplyCh <- reply
 			case r := <-requestVoteReplyCh:
+				if r.Reply.Term > state.CurrentTerm {
+					log.Println("Greater term than  ours")
+					state.CurrentTerm = r.Args.Term
+					nextState = 0
+					changeState()
+				}
 				nextState = config.Behaviors[currentState].RequestVoteReply(r)
 			case r := <-appendEntriesReplyCh:
+				if r.Reply.Term > state.CurrentTerm {
+					log.Println("Greater term than  ours")
+					state.CurrentTerm = r.Args.Term
+					nextState = 0
+					changeState()
+				}
 				nextState = config.Behaviors[currentState].AppendEntriesReply(r)
-			case <-timeout:
-				timeout = time.After(randomTimeout())
+			case <-state.TimeoutCh:
+				state.TimeoutCh = nil
 				nextState = config.Behaviors[currentState].Timeout()
 			case <-done:
 				finished = true
