@@ -111,6 +111,5 @@ func main() {
 	machine.Run(config)
 
 	for {
-
 	}
 }

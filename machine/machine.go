@@ -85,6 +85,7 @@ func Run(config MachineConfig) chan struct{} {
 
 		for !finished {
 			if nextState != currentState {
+				log.Print("Switching to state: ", nextState)
 				currentState = nextState
 				config.Behaviors[currentState].Entered(&state)
 			}

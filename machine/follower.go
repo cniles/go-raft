@@ -30,7 +30,7 @@ func (f *Follower) AppendEntries() int64 {
 	return 0
 }
 
-func (f *Follower) AppendEntriesReply(accepted bool) int64 {
+func (f *Follower) AppendEntriesReply(message peer.AppendEntriesReplyMessage) int64 {
 	return 0
 }
 
