@@ -60,9 +60,9 @@ func Run(config MachineConfig) chan struct{} {
 		requestVoteReplyCh := make(chan peer.RequestVoteReplyMessage)
 		appendEntriesReplyCh := make(chan peer.AppendEntriesReplyMessage)
 
-		for _, endpoint := range config.Endpoints {
+		for idx, endpoint := range config.Endpoints {
 			state.NextIndex = append(state.NextIndex, state.CommitIndex+1)
-			state.Peers = append(state.Peers, peer.MakePeer(endpoint, requestVoteReplyCh, appendEntriesReplyCh))
+			state.Peers = append(state.Peers, peer.MakePeer(int64(idx), endpoint, requestVoteReplyCh, appendEntriesReplyCh))
 		}
 
 		serviceAgent, err := service.RunAgent(config.Port)

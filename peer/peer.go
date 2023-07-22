@@ -6,23 +6,26 @@ import (
 )
 
 type RequestVoteReplyMessage struct {
+	peer  int64
 	args  *service.RequestVoteArgs
 	reply *service.RequestVoteReply
 }
 
 type AppendEntriesReplyMessage struct {
+	peer  int64
 	args  *service.AppendEntriesArgs
 	reply *service.AppendEntriesReply
 }
 
 type Peer struct {
+	num                  int64
 	endpoint             string
 	requestVoteReplyCh   chan RequestVoteReplyMessage
 	appendEntriesReplyCh chan AppendEntriesReplyMessage
 }
 
-func MakePeer(endpoint string, requestVoteReplyCh chan RequestVoteReplyMessage, appendEntriesReplyCh chan AppendEntriesReplyMessage) Peer {
-	return Peer{endpoint, requestVoteReplyCh, appendEntriesReplyCh}
+func MakePeer(num int64, endpoint string, requestVoteReplyCh chan RequestVoteReplyMessage, appendEntriesReplyCh chan AppendEntriesReplyMessage) Peer {
+	return Peer{num, endpoint, requestVoteReplyCh, appendEntriesReplyCh}
 }
 
 func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
@@ -42,7 +45,7 @@ func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
 		break
 	}
 
-	p.requestVoteReplyCh <- RequestVoteReplyMessage{args, reply}
+	p.requestVoteReplyCh <- RequestVoteReplyMessage{p.num, args, reply}
 }
 
 func (p *Peer) AppendEntries(args *service.AppendEntriesArgs) {
@@ -62,5 +65,5 @@ func (p *Peer) AppendEntries(args *service.AppendEntriesArgs) {
 		break
 	}
 
-	p.appendEntriesReplyCh <- AppendEntriesReplyMessage{args, reply}
+	p.appendEntriesReplyCh <- AppendEntriesReplyMessage{p.num, args, reply}
 }

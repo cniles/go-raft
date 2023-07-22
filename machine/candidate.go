@@ -7,11 +7,14 @@ import (
 )
 
 type Candidate struct {
-	state *state.State
+	state          *state.State
+	term           int64
+	voterResponded []bool
 }
 
 func (c *Candidate) Entered(state *state.State) {
-	// TODO run election
+	c.voterResponded = make([]bool, 12)
+
 }
 
 func (c *Candidate) GrantedVote() int64 {
