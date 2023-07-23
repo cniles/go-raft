@@ -30,8 +30,7 @@ func MakePeer(num int64, endpoint string, requestVoteReplyCh chan RequestVoteRep
 	return Peer{num, endpoint, requestVoteReplyCh, appendEntriesReplyCh}
 }
 
-func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
-	reply := &service.RequestVoteReply{}
+func (p *Peer) retryCall(name string, args any, reply any) {
 	f := time.Duration(1)
 
 	for {
@@ -45,7 +44,7 @@ func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
 			continue
 		}
 
-		client.Call("Agent.RequestVote", args, reply)
+		client.Call(name, args, reply)
 		client.Close()
 		if err != nil {
 			time.Sleep(10 * f * time.Millisecond)
@@ -54,31 +53,17 @@ func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
 		break
 	}
 
-	log.Print("Received RequestVote reply: ", reply.Term, reply.VoteGranted)
+	log.Printf("Received %s reply\n", name)
+}
+
+func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
+	reply := &service.RequestVoteReply{}
+	p.retryCall("Agent.RequestVote", args, reply)
 	p.requestVoteReplyCh <- RequestVoteReplyMessage{p.Num, args, reply}
 }
 
 func (p *Peer) AppendEntries(args *service.AppendEntriesArgs) {
 	reply := &service.AppendEntriesReply{}
-
-	f := time.Duration(0)
-	for {
-		f++
-		client, err := rpc.DialHTTP("tcp", p.endpoint)
-		defer client.Close()
-		if err != nil {
-			time.Sleep(100 * f * time.Millisecond)
-			continue
-		}
-		client.Call("Agent.AppendEntries", args, reply)
-		if err != nil {
-			client.Close()
-			time.Sleep(10 * f * time.Millisecond)
-			continue
-		}
-		break
-	}
-
-	log.Print("Received AppendEntries reply: ", reply.Term, reply.Success)
+	p.retryCall("Agent.AppendEntries", args, reply)
 	p.appendEntriesReplyCh <- AppendEntriesReplyMessage{p.Num, args, reply}
 }

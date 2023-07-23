@@ -7,6 +7,48 @@ import (
 	"strconv"
 )
 
+type RequestVoteArgs struct {
+	Term         int64
+	CandidateId  string
+	LastLogTerm  int64
+	LastLogIndex int64
+}
+
+func (a RequestVoteArgs) GetTerm() int64 {
+	return a.Term
+}
+
+type AppendEntriesArgs struct {
+	Term         int64
+	LeaderId     string
+	PrevLogIndex int64
+	PrevLogTerm  int64
+	Entries      []Entry
+	LeaderCommit int64
+}
+
+func (a AppendEntriesArgs) GetTerm() int64 {
+	return a.Term
+}
+
+type RequestVoteReply struct {
+	Term        int64
+	VoteGranted bool
+}
+
+func (r RequestVoteReply) GetTerm() int64 {
+	return r.Term
+}
+
+type AppendEntriesReply struct {
+	Term    int64
+	Success bool
+}
+
+func (r AppendEntriesReply) GetTerm() int64 {
+	return r.Term
+}
+
 type RequestVoteMessage struct {
 	Args    *RequestVoteArgs
 	ReplyCh chan *RequestVoteReply
@@ -24,35 +66,9 @@ type Agent struct {
 	l net.Listener
 }
 
-type RequestVoteArgs struct {
-	Term         int64
-	CandidateId  string
-	LastLogTerm  int64
-	LastLogIndex int64
-}
-
 type Entry struct {
 	Term    int64
 	Command string
-}
-
-type AppendEntriesArgs struct {
-	Term         int64
-	LeaderId     string
-	PrevLogIndex int64
-	PrevLogTerm  int64
-	Entries      []Entry
-	LeaderCommit int64
-}
-
-type RequestVoteReply struct {
-	Term        int64
-	VoteGranted bool
-}
-
-type AppendEntriesReply struct {
-	Term    int64
-	Success bool
 }
 
 func (t *Agent) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) error {

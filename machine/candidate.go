@@ -2,6 +2,7 @@ package machine
 
 import (
 	"log"
+	"math"
 	"raft/peer"
 	"raft/service"
 	"raft/state"
@@ -66,7 +67,7 @@ func (c *Candidate) RequestVoteReply(message peer.RequestVoteReplyMessage) int64
 		c.voterResponded[message.Peer] = true
 	}
 
-	majority := len(c.state.Peers) + 1
+	majority := int64(math.Floor(float64(len(c.state.Peers)+1)/2.0) + 1)
 
 	log.Println("Tally at: ", c.tally, majority)
 

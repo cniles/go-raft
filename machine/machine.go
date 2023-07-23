@@ -17,6 +17,10 @@ type MachineConfig struct {
 	Behaviors  []state.StateBehavior
 }
 
+type RpcRequestResponse interface {
+	GetTerm() int64
+}
+
 func requestVoteHandler(args *service.RequestVoteArgs, state *state.State) *service.RequestVoteReply {
 	granted := false
 
@@ -95,6 +99,15 @@ func Run(config MachineConfig) chan struct{} {
 			config.Behaviors[currentState].Entered(&state)
 		}
 
+		var checkTerm = func(r RpcRequestResponse) {
+			if r.GetTerm() > state.CurrentTerm {
+				log.Println("Greater term than ours")
+				state.CurrentTerm = r.GetTerm()
+				nextState = 0
+				changeState()
+			}
+		}
+
 		for !finished {
 			if nextState != currentState {
 				changeState()
@@ -110,12 +123,7 @@ func Run(config MachineConfig) chan struct{} {
 			select {
 			case r := <-serviceAgent.RequestVoteCh:
 				log.Println("Responding to request for vote from ", r.Args.CandidateId)
-				if r.Args.Term > state.CurrentTerm {
-					log.Println("Greater term than  ours")
-					state.CurrentTerm = r.Args.Term
-					nextState = 0
-					changeState()
-				}
+				checkTerm(r.Args)
 				reply := requestVoteHandler(r.Args, &state)
 				if reply.VoteGranted {
 					log.Println("Vote granted for term to: ", state.CurrentTerm, state.VotedFor)
@@ -124,32 +132,17 @@ func Run(config MachineConfig) chan struct{} {
 				r.ReplyCh <- reply
 			case r := <-serviceAgent.AppendEntriesCh:
 				log.Println("Responding to AppendEntries from ", r.Args.LeaderId)
-				if r.Args.Term > state.CurrentTerm {
-					log.Println("Greater term than  ours")
-					state.CurrentTerm = r.Args.Term
-					nextState = 0
-					changeState()
-				}
+				checkTerm(r.Args)
 				reply := appendEntriesHandler(r.Args, &state)
 				if r.Args.Term == state.CurrentTerm {
 					nextState = config.Behaviors[currentState].AppendEntries()
 				}
 				r.ReplyCh <- reply
 			case r := <-requestVoteReplyCh:
-				if r.Reply.Term > state.CurrentTerm {
-					log.Println("Greater term than  ours")
-					state.CurrentTerm = r.Args.Term
-					nextState = 0
-					changeState()
-				}
+				checkTerm(r.Args)
 				nextState = config.Behaviors[currentState].RequestVoteReply(r)
 			case r := <-appendEntriesReplyCh:
-				if r.Reply.Term > state.CurrentTerm {
-					log.Println("Greater term than  ours")
-					state.CurrentTerm = r.Args.Term
-					nextState = 0
-					changeState()
-				}
+				checkTerm(r.Args)
 				nextState = config.Behaviors[currentState].AppendEntriesReply(r)
 			case <-state.TimeoutCh:
 				state.TimeoutCh = nil

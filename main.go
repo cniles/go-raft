@@ -28,8 +28,8 @@ type Entry struct {
 
 var portFlag = flag.Int("p", 9990, "the port to listen on")
 
-var minTimeout = flag.Int("t", 5000, "minimum timeout")
-var maxTimeout = flag.Int("T", 6000, "maximum timeout")
+var minTimeout = flag.Int("t", 150, "minimum timeout")
+var maxTimeout = flag.Int("T", 300, "maximum timeout")
 
 var endpointsFlag = flag.String("P", "", "comma separated list of agent endpoints (hostname:port)")
 
@@ -56,7 +56,7 @@ func main() {
 		Behaviors: []state.StateBehavior{
 			new(machine.Follower),
 			&machine.Candidate{CandidateId: agentId},
-			&machine.Leader{LeaderId: agentId, MinTimeout: 1000},
+			&machine.Leader{LeaderId: agentId, MinTimeout: 15},
 		},
 	}
 
