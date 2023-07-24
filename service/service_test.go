@@ -72,10 +72,8 @@ func TestAppendEntries(t *testing.T) {
 	// Make RPC
 	client.Go("Agent.AppendEntries", args, &reply, done)
 
-	fmt.Println("Waiting for message.")
 	// Receive message
 	message := <-agent.AppendEntriesCh
-	fmt.Println("Message received.")
 	// Send reply
 	sent := AppendEntriesReply{1, true}
 	message.ReplyCh <- &sent
@@ -100,4 +98,24 @@ func TestMultipleAgents(t *testing.T) {
 
 	client2 := makeClient(9991, t)
 	defer client2.Close()
+}
+
+func TestClientCommand(t *testing.T) {
+	agent := runAgent(9998, t)
+	defer agent.Stop()
+	client := makeClient(9998, t)
+	defer client.Close()
+
+	args := &ClientCommandArgs{
+		Command: "",
+	}
+	reply := &ClientCommandReply{}
+
+	done := make(chan *rpc.Call, 10)
+
+	client.Go("Agent.ClientCommand", args, reply, done)
+
+	message := <-agent.ClientCommandCh
+
+	message.ReplyCh <- &ClientCommandReply{}
 }

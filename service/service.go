@@ -49,6 +49,15 @@ func (r AppendEntriesReply) GetTerm() int64 {
 	return r.Term
 }
 
+type ClientCommandArgs struct {
+	Command string
+}
+
+type ClientCommandReply struct {
+	Leader    string
+	LastIndex int64
+}
+
 type RequestVoteMessage struct {
 	Args    *RequestVoteArgs
 	ReplyCh chan *RequestVoteReply
@@ -59,9 +68,15 @@ type AppendEntriesMessage struct {
 	ReplyCh chan *AppendEntriesReply
 }
 
+type ClientCommandMessage struct {
+	Args    *ClientCommandArgs
+	ReplyCh chan *ClientCommandReply
+}
+
 type Agent struct {
 	RequestVoteCh   chan RequestVoteMessage
 	AppendEntriesCh chan AppendEntriesMessage
+	ClientCommandCh chan ClientCommandMessage
 
 	l net.Listener
 }
@@ -85,14 +100,23 @@ func (t *Agent) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) erro
 	return nil
 }
 
+func (t *Agent) ClientCommand(args *ClientCommandArgs, reply *ClientCommandReply) error {
+	replyCh := make(chan *ClientCommandReply)
+	t.ClientCommandCh <- ClientCommandMessage{args, replyCh}
+	*reply = *(<-replyCh)
+	return nil
+}
+
 func (t *Agent) Stop() {
 	t.l.Close()
 }
 
 func RunAgent(port int64) (*Agent, error) {
 	agent := new(Agent)
+
 	agent.RequestVoteCh = make(chan RequestVoteMessage)
 	agent.AppendEntriesCh = make(chan AppendEntriesMessage)
+	agent.ClientCommandCh = make(chan ClientCommandMessage)
 
 	serveMux := http.NewServeMux()
 	server := rpc.NewServer()

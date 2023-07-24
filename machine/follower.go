@@ -44,3 +44,7 @@ func (f *Follower) Timeout() int64 {
 	}
 	return 1
 }
+
+func (f *Follower) ClientCommand(command string) int64 {
+	return -1
+}

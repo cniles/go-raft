@@ -86,3 +86,7 @@ func (c *Candidate) Timeout() int64 {
 	c.startElection()
 	return 1
 }
+
+func (c *Candidate) ClientCommand(command string) int64 {
+	return -1
+}
