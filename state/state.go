@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+type LogRequest struct {
+	NextIndex int64
+	ReplyCh   chan<- *service.AppendEntriesArgs
+}
+
+type ServerChangeRequest struct {
+	Action   string
+	Endpoint string
+	ReplyCh  chan struct{}
+}
+
 type StateBehavior interface {
 	Entered(state *State)
 
@@ -16,6 +27,9 @@ type StateBehavior interface {
 	AppendEntriesReply(message peer.AppendEntriesReplyMessage) int64
 
 	ClientCommand(command string) int64
+
+	AddServer(message service.AddServerMessage)
+	RemoveServer(message service.RemoveServerMessage)
 
 	Timeout() int64
 }
@@ -30,12 +44,20 @@ type State struct {
 	LastApplied int64
 
 	// leader only
-	NextIndex  []int64
-	MatchIndex []int64
 
-	Peers  []peer.Peer
+	NextIndex  map[string]int64
+	MatchIndex map[string]int64
+
+	Peers map[string]peer.Peer
+
 	Leader string
 	// The timeout channel to be read from
 	// when muxing in events.
 	TimeoutCh <-chan time.Time
+
+	LogRequestCh chan LogRequest
+
+	ServerChangeCh chan ServerChangeRequest
+
+	MakePeer func(endpoint string)
 }

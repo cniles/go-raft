@@ -33,8 +33,9 @@ var portFlag = flag.Int("p", 9990, "the port to listen on")
 var minTimeout = flag.Int("t", 2000, "minimum timeout")
 var maxTimeout = flag.Int("T", 2500, "maximum timeout")
 
-var command = flag.String("C", "", "Run a client command instead")
+var command = flag.String("C", "", "Invoke an RPC")
 var server = flag.String("S", ":9990", "server to connect to")
+var message = flag.String("m", "hello world", "message to append")
 
 var endpointsFlag = flag.String("P", "", "comma separated list of agent endpoints (hostname:port)")
 
@@ -45,14 +46,17 @@ func makeUlid() ulid.ULID {
 }
 
 func doServer() {
-
-	endpoints := strings.Split(*endpointsFlag, ",")
+	endpoints := []string{}
+	if *endpointsFlag != "" {
+		endpoints = strings.Split(*endpointsFlag, ",")
+	}
 
 	log.Println(endpoints)
 
 	agentId := ":" + strconv.FormatInt(int64(*portFlag), 10)
 
 	config := machine.MachineConfig{
+		AgentId:    agentId,
 		Port:       int64(*portFlag),
 		Endpoints:  endpoints,
 		MinTimeout: int64(*minTimeout),
@@ -60,7 +64,7 @@ func doServer() {
 		Behaviors: []state.StateBehavior{
 			new(machine.Follower),
 			&machine.Candidate{CandidateId: agentId},
-			&machine.Leader{LeaderId: agentId, MinTimeout: 1000},
+			&machine.Leader{LeaderId: agentId, MinTimeout: int64(*minTimeout), MaxTimeout: int64(*maxTimeout), TimeoutFactor: 0.5},
 		},
 	}
 
@@ -71,30 +75,138 @@ func doServer() {
 
 }
 
+func clientCommand(command string, client *rpc.Client) string {
+	reply := &service.ClientCommandReply{}
+	args := &service.ClientCommandArgs{
+		Command: command,
+	}
+
+	error := client.Call("Agent.ClientCommand", args, reply)
+
+	if error != nil {
+		log.Fatal("error from rpc client", error)
+	}
+
+	if reply.LastIndex == -1 {
+		return reply.Leader
+	}
+
+	return ""
+}
+
+func addServer(server string, client *rpc.Client) string {
+	reply := &service.AddServerReply{}
+	args := &service.AddServerArgs{
+		NewServer: server,
+	}
+
+	log.Println("Running command")
+
+	err := client.Call("Agent.AddServer", args, reply)
+
+	if err != nil {
+		log.Fatal("Endpoint returned error", err)
+	}
+
+	log.Println("Replied with:", reply.Status)
+
+	if reply.Status == "NOT_LEADER" {
+		return reply.LeaderHint
+	}
+
+	if reply.Status == "TIMEOUT" {
+		log.Println("Timed out updating new machine")
+	} else if reply.Status == "OK" {
+		log.Println("Machine added")
+	} else {
+		log.Println("Unexpected result:", reply.Status)
+	}
+
+	return ""
+}
+
+func removeServer(server string, client *rpc.Client) string {
+	reply := &service.RemoveServerReply{}
+	args := &service.RemoveServerArgs{
+		NewServer: server,
+	}
+
+	err := client.Call("Agent.RemoveServer", args, reply)
+
+	if err != nil {
+		log.Fatal("Endpoint returned an error", err)
+	}
+
+	if reply.LeaderHint != "" {
+	}
+
+	if reply.Status == "OK" {
+		log.Println("Server removed")
+		return ""
+	} else {
+		log.Println("Returned: ", reply.Status)
+	}
+
+	return reply.LeaderHint
+}
+
+func doCommands(count int, clientNum int, done chan struct{}) {
+	log.Printf("%d starting %d requests", clientNum, count)
+	client, err := rpc.DialHTTP("tcp", *server)
+	if err != nil {
+		log.Fatal("Could not dial client")
+	}
+	defer client.Close()
+	for j := 0; j < count; j++ {
+		clientCommand("log "+strconv.FormatInt(int64(j), 10)+" "+strconv.FormatInt(int64(clientNum), 10), client)
+	}
+	log.Printf("Client %d done", clientNum)
+	done <- struct{}{}
+}
+
+func benchmark() {
+	total := 75000
+	clients := 50
+	count := total / clients
+	done := make(chan struct{})
+	for i := 0; i < clients; i++ {
+		go doCommands(count, i, done)
+	}
+
+	for i := 0; i < clients; i++ {
+		<-done
+	}
+}
+
 func doClient() {
-	log.Println("Client command")
-
 	done := false
-
 	for !done {
 		client, err := rpc.DialHTTP("tcp", *server)
 		if err != nil {
 			log.Fatal("Failed to dial server:", *server)
 		}
+		leader := ""
 
-		reply := &service.ClientCommandReply{}
-
-		args := &service.ClientCommandArgs{
-			Command: *command,
+		switch *command {
+		case "clientcommand":
+			leader = clientCommand(*message, client)
+		case "addserver":
+			leader = addServer(*message, client)
+		case "removeserver":
+			leader = removeServer(*message, client)
+		case "benchmark":
+			start := time.Now()
+			benchmark()
+			finish := time.Now().Sub(start)
+			log.Println("Benchmark finished in", finish)
+		default:
+			log.Println("Unrecognized command", *command)
 		}
 
-		client.Call("Agent.ClientCommand", args, reply)
-
-		if reply.LastIndex == -1 {
-			log.Println("redirect to leader:", reply.Leader)
-			*server = reply.Leader
+		if leader != "" {
+			log.Println("redirect to leader:", leader)
+			*server = leader
 		} else {
-			log.Println("Appended to index", reply.LastIndex)
 			done = true
 		}
 
@@ -106,8 +218,10 @@ func main() {
 	flag.Parse()
 
 	if *command != "" {
+		log.Println("Starting command")
 		doClient()
 	} else {
+		log.Println("Starting server")
 		doServer()
 	}
 }

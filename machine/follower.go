@@ -3,6 +3,7 @@ package machine
 import (
 	"log"
 	"raft/peer"
+	"raft/service"
 	"raft/state"
 )
 
@@ -29,7 +30,6 @@ func (f *Follower) RequestVoteReply(message peer.RequestVoteReplyMessage) int64 
 
 func (f *Follower) AppendEntries() int64 {
 	f.notTimedOut = true
-	log.Println("Heartbeating received")
 	return 0
 }
 
@@ -42,9 +42,29 @@ func (f *Follower) Timeout() int64 {
 		f.notTimedOut = false
 		return 0
 	}
+
+	if len(f.state.Peers) == 0 {
+		log.Println("No peers yet")
+		return 0
+	}
+
 	return 1
 }
 
 func (f *Follower) ClientCommand(command string) int64 {
 	return -1
+}
+
+func (f *Follower) AddServer(message service.AddServerMessage) {
+	message.ReplyCh <- &service.AddServerReply{
+		Status:     "NOT_LEADER",
+		LeaderHint: f.state.Leader,
+	}
+}
+
+func (f *Follower) RemoveServer(message service.RemoveServerMessage) {
+	message.ReplyCh <- &service.RemoveServerReply{
+		Status:     "NOT_LEADER",
+		LeaderHint: f.state.Leader,
+	}
 }

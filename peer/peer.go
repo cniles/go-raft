@@ -1,39 +1,44 @@
 package peer
 
 import (
-	"log"
 	"net/rpc"
 	"raft/service"
 	"time"
 )
 
 type RequestVoteReplyMessage struct {
-	Peer  int64
-	Args  *service.RequestVoteArgs
-	Reply *service.RequestVoteReply
+	Endpoint   string
+	Args       *service.RequestVoteArgs
+	Reply      *service.RequestVoteReply
+	Terminated bool
 }
 
 type AppendEntriesReplyMessage struct {
-	Peer  int64
-	Args  *service.AppendEntriesArgs
-	Reply *service.AppendEntriesReply
+	Endpoint   string
+	Args       *service.AppendEntriesArgs
+	Reply      *service.AppendEntriesReply
+	Terminated bool
 }
 
 type Peer struct {
-	Num                  int64
 	endpoint             string
 	requestVoteReplyCh   chan RequestVoteReplyMessage
 	appendEntriesReplyCh chan AppendEntriesReplyMessage
 }
 
-func MakePeer(num int64, endpoint string, requestVoteReplyCh chan RequestVoteReplyMessage, appendEntriesReplyCh chan AppendEntriesReplyMessage) Peer {
-	return Peer{num, endpoint, requestVoteReplyCh, appendEntriesReplyCh}
+func MakePeer(endpoint string, requestVoteReplyCh chan RequestVoteReplyMessage, appendEntriesReplyCh chan AppendEntriesReplyMessage) Peer {
+	return Peer{endpoint, requestVoteReplyCh, appendEntriesReplyCh}
 }
 
-func (p *Peer) retryCall(name string, args any, reply any) {
+func (p *Peer) retryCall(name string, args any, reply any, terminate <-chan struct{}) bool {
 	f := time.Duration(1)
 
 	for {
+		select {
+		case <-terminate:
+			return true
+		default:
+		}
 		if f > 16 {
 			f = 20
 		}
@@ -53,17 +58,25 @@ func (p *Peer) retryCall(name string, args any, reply any) {
 		break
 	}
 
-	log.Printf("Received %s reply\n", name)
+	// log.Printf("Received %s reply\n", name)
+	return false
+
 }
 
-func (p *Peer) RequestVote(args *service.RequestVoteArgs) {
+func (p *Peer) RequestVote(args *service.RequestVoteArgs) chan<- struct{} {
+	terminate := make(chan struct{})
 	reply := &service.RequestVoteReply{}
-	p.retryCall("Agent.RequestVote", args, reply)
-	p.requestVoteReplyCh <- RequestVoteReplyMessage{p.Num, args, reply}
+	terminated := p.retryCall("Agent.RequestVote", args, reply, terminate)
+	p.requestVoteReplyCh <- RequestVoteReplyMessage{p.endpoint, args, reply, terminated}
+	return terminate
 }
 
-func (p *Peer) AppendEntries(args *service.AppendEntriesArgs) {
+func (p *Peer) AppendEntries(args *service.AppendEntriesArgs) chan<- struct{} {
+	terminate := make(chan struct{})
 	reply := &service.AppendEntriesReply{}
-	p.retryCall("Agent.AppendEntries", args, reply)
-	p.appendEntriesReplyCh <- AppendEntriesReplyMessage{p.Num, args, reply}
+	go func() {
+		terminated := p.retryCall("Agent.AppendEntries", args, reply, terminate)
+		p.appendEntriesReplyCh <- AppendEntriesReplyMessage{p.endpoint, args, reply, terminated}
+	}()
+	return terminate
 }

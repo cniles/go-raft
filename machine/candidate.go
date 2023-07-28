@@ -10,13 +10,13 @@ import (
 
 type Candidate struct {
 	state          *state.State
-	voterResponded []bool
+	voterResponded map[string]bool
 	CandidateId    string
 	tally          int64
 }
 
 func (c *Candidate) startElection() {
-	c.voterResponded = make([]bool, len(c.state.Peers))
+	c.voterResponded = make(map[string]bool)
 	c.tally = 1
 
 	// Increment current term
@@ -59,12 +59,14 @@ func (c *Candidate) AppendEntries() int64 {
 }
 
 func (c *Candidate) RequestVoteReply(message peer.RequestVoteReplyMessage) int64 {
-	if message.Args.Term == c.state.CurrentTerm && !c.voterResponded[message.Peer] {
+	if message.Args.Term == c.state.CurrentTerm && !c.voterResponded[message.Endpoint] {
 		if message.Reply.VoteGranted {
-			log.Println("-------> Vote granted from ", message.Peer)
+			log.Println("-------> Vote granted from ", message.Endpoint)
 			c.tally++
 		}
-		c.voterResponded[message.Peer] = true
+		c.voterResponded[message.Endpoint] = true
+	} else {
+		log.Println("Didn't count vote", message.Reply.VoteGranted, message.Reply.Term, c.voterResponded)
 	}
 
 	majority := int64(math.Floor(float64(len(c.state.Peers)+1)/2.0) + 1)
@@ -89,4 +91,18 @@ func (c *Candidate) Timeout() int64 {
 
 func (c *Candidate) ClientCommand(command string) int64 {
 	return -1
+}
+
+func (c *Candidate) AddServer(message service.AddServerMessage) {
+	message.ReplyCh <- &service.AddServerReply{
+		Status:     "NOT_LEADER",
+		LeaderHint: c.state.Leader,
+	}
+}
+
+func (c *Candidate) RemoveServer(message service.RemoveServerMessage) {
+	message.ReplyCh <- &service.RemoveServerReply{
+		Status:     "NOT_LEADER",
+		LeaderHint: c.state.Leader,
+	}
 }

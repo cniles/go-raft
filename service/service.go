@@ -41,8 +41,9 @@ func (r RequestVoteReply) GetTerm() int64 {
 }
 
 type AppendEntriesReply struct {
-	Term    int64
-	Success bool
+	Term      int64
+	Success   bool
+	LogLength int64
 }
 
 func (r AppendEntriesReply) GetTerm() int64 {
@@ -56,6 +57,34 @@ type ClientCommandArgs struct {
 type ClientCommandReply struct {
 	Leader    string
 	LastIndex int64
+}
+
+type AddServerArgs struct {
+	NewServer string
+}
+
+type AddServerReply struct {
+	Status     string
+	LeaderHint string
+}
+
+type AddServerMessage struct {
+	Args    *AddServerArgs
+	ReplyCh chan *AddServerReply
+}
+
+type RemoveServerArgs struct {
+	NewServer string
+}
+
+type RemoveServerReply struct {
+	Status     string
+	LeaderHint string
+}
+
+type RemoveServerMessage struct {
+	Args    *RemoveServerArgs
+	ReplyCh chan *RemoveServerReply
 }
 
 type RequestVoteMessage struct {
@@ -77,6 +106,8 @@ type Agent struct {
 	RequestVoteCh   chan RequestVoteMessage
 	AppendEntriesCh chan AppendEntriesMessage
 	ClientCommandCh chan ClientCommandMessage
+	AddServerCh     chan AddServerMessage
+	RemoveServerCh  chan RemoveServerMessage
 
 	l net.Listener
 }
@@ -107,6 +138,20 @@ func (t *Agent) ClientCommand(args *ClientCommandArgs, reply *ClientCommandReply
 	return nil
 }
 
+func (t *Agent) AddServer(args *AddServerArgs, reply *AddServerReply) error {
+	replyCh := make(chan *AddServerReply)
+	t.AddServerCh <- AddServerMessage{args, replyCh}
+	*reply = *(<-replyCh)
+	return nil
+}
+
+func (t *Agent) RemoveServer(args *RemoveServerArgs, reply *RemoveServerReply) error {
+	replyCh := make(chan *RemoveServerReply)
+	t.RemoveServerCh <- RemoveServerMessage{args, replyCh}
+	*reply = *(<-replyCh)
+	return nil
+}
+
 func (t *Agent) Stop() {
 	t.l.Close()
 }
@@ -117,6 +162,8 @@ func RunAgent(port int64) (*Agent, error) {
 	agent.RequestVoteCh = make(chan RequestVoteMessage)
 	agent.AppendEntriesCh = make(chan AppendEntriesMessage)
 	agent.ClientCommandCh = make(chan ClientCommandMessage)
+	agent.AddServerCh = make(chan AddServerMessage)
+	agent.RemoveServerCh = make(chan RemoveServerMessage)
 
 	serveMux := http.NewServeMux()
 	server := rpc.NewServer()
