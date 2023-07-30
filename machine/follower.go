@@ -43,8 +43,8 @@ func (f *Follower) Timeout() int64 {
 		return 0
 	}
 
-	if len(f.state.Peers) == 0 {
-		log.Println("No peers yet")
+	if !f.state.Servers[f.state.AgentId] {
+		log.Println("Not in the configuration")
 		return 0
 	}
 

@@ -48,9 +48,13 @@ type State struct {
 	NextIndex  map[string]int64
 	MatchIndex map[string]int64
 
+	Servers map[string]bool
+
 	Peers map[string]peer.Peer
 
 	Leader string
+
+	AgentId string
 	// The timeout channel to be read from
 	// when muxing in events.
 	TimeoutCh <-chan time.Time
@@ -60,4 +64,6 @@ type State struct {
 	ServerChangeCh chan ServerChangeRequest
 
 	MakePeer func(endpoint string)
+
+	LastTime time.Time
 }

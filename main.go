@@ -30,14 +30,14 @@ type Entry struct {
 
 var portFlag = flag.Int("p", 9990, "the port to listen on")
 
-var minTimeout = flag.Int("t", 2000, "minimum timeout")
-var maxTimeout = flag.Int("T", 2500, "maximum timeout")
+var minTimeout = flag.Int("t", 2500, "minimum timeout")
+var maxTimeout = flag.Int("T", 3000, "maximum timeout")
 
 var command = flag.String("C", "", "Invoke an RPC")
 var server = flag.String("S", ":9990", "server to connect to")
 var message = flag.String("m", "hello world", "message to append")
 
-var endpointsFlag = flag.String("P", "", "comma separated list of agent endpoints (hostname:port)")
+var endpointsFlag = flag.String("c", "", "comma separated list of agent endpoints (hostname:port)")
 
 func makeUlid() ulid.ULID {
 	t := time.Unix(1000000, 0)
@@ -64,7 +64,12 @@ func doServer() {
 		Behaviors: []state.StateBehavior{
 			new(machine.Follower),
 			&machine.Candidate{CandidateId: agentId},
-			&machine.Leader{LeaderId: agentId, MinTimeout: int64(*minTimeout), MaxTimeout: int64(*maxTimeout), TimeoutFactor: 0.5},
+			&machine.Leader{
+				LeaderId:      agentId,
+				MinTimeout:    int64(*minTimeout),
+				MaxTimeout:    int64(*maxTimeout),
+				TimeoutFactor: 0.1,
+			},
 		},
 	}
 

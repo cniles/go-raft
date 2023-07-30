@@ -75,12 +75,16 @@ func (l *Leader) handshake() {
 		if !l.appending[endpoint] {
 			l.appending[endpoint] = true
 			peer.AppendEntries(args)
+			// log.Println("Sending handshake")
 		} else {
+			// log.Println("Skipping handshake")
 		}
 	}
 
 	min := int64(float64(l.MinTimeout) * l.TimeoutFactor)
 	max := int64(float64(l.MaxTimeout) * l.TimeoutFactor)
+
+	// log.Println("Resetting timeout", min, max)
 	l.state.TimeoutCh = time.After(util.RandomTimeout(min, max))
 }
 
@@ -196,12 +200,12 @@ func doRounds(c roundConfig) bool {
 				p := c.nextIndex
 				c.nextIndex = replyMessage.Reply.LogLength + 1
 				if replyMessage.Reply.Success {
-					log.Println("Received success")
+					// log.Println("Received success")
 					timeoutCh = time.After(util.RandomTimeout(c.minTimeout, c.maxTimeout))
 					progressed = true
 					args = getLogs()
 				} else {
-					log.Println("Round reply failure")
+					// log.Println("Round reply failure")
 					l := (p - c.nextIndex) + int64(len(args.Entries))
 					args = getLogs()
 					args.Entries = args.Entries[:l]

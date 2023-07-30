@@ -28,14 +28,15 @@ type clientRequest struct {
 	logIndex int64
 }
 
-func requestVoteHandler(args *service.RequestVoteArgs, state *state.State) *service.RequestVoteReply {
+func requestVoteHandler(args *service.RequestVoteArgs, state *state.State, minTimeout int64) *service.RequestVoteReply {
 
 	reply := &service.RequestVoteReply{
 		Term:        state.CurrentTerm,
 		VoteGranted: false,
 	}
 
-	if args.Term < state.CurrentTerm {
+	if !state.Servers[state.AgentId] {
+		log.Println("Not in configuration")
 		return reply
 	}
 
@@ -148,16 +149,6 @@ func processLogs(input chan service.Entry, output chan int64, index int64) {
 	}
 }
 
-func purgePendingVotes(queue []*service.RequestVoteMessage, currentTerm int64) {
-	for _, r := range queue {
-		log.Println("Purging vote from", r.Args.CandidateId)
-		r.ReplyCh <- &service.RequestVoteReply{
-			Term:        currentTerm,
-			VoteGranted: false,
-		}
-	}
-}
-
 func Run(config MachineConfig) chan struct{} {
 	done := make(chan struct{})
 	go func() {
@@ -165,8 +156,6 @@ func Run(config MachineConfig) chan struct{} {
 		logAppliedCh := make(chan int64)
 		requestVoteReplyCh := make(chan peer.RequestVoteReplyMessage)
 		appendEntriesReplyCh := make(chan peer.AppendEntriesReplyMessage)
-
-		pendingVoteRequests := make([]*service.RequestVoteMessage, 0)
 
 		pendingClientRequests := make([]clientRequest, 0)
 		pendingServerChangeRequests := make([]state.ServerChangeRequest, 0)
@@ -183,18 +172,25 @@ func Run(config MachineConfig) chan struct{} {
 			Peers:          make(map[string]peer.Peer),
 			ServerChangeCh: make(chan state.ServerChangeRequest),
 			LogRequestCh:   make(chan state.LogRequest),
+			AgentId:        config.AgentId,
+			Servers:        make(map[string]bool),
 		}
 
 		s.MakePeer = func(endpoint string) {
 			s.Peers[endpoint] = peer.MakePeer(endpoint, requestVoteReplyCh, appendEntriesReplyCh)
+			s.Servers[endpoint] = true
+			s.NextIndex[endpoint] = int64(len(s.Log))
+			s.MatchIndex[endpoint] = 0
 		}
 
 		go processLogs(applyLogCh, logAppliedCh, s.LastApplied)
 
 		for _, endpoint := range config.Endpoints {
-			s.NextIndex[endpoint] = int64(len(s.Log))
-			s.MatchIndex[endpoint] = 0
-			s.MakePeer(endpoint)
+			if config.AgentId == endpoint {
+				s.Servers[endpoint] = true
+			} else {
+				s.MakePeer(endpoint)
+			}
 		}
 
 		serviceAgent, err := service.RunAgent(config.Port)
@@ -208,7 +204,7 @@ func Run(config MachineConfig) chan struct{} {
 		nextState := int64(0)
 
 		var changeState = func() {
-			log.Println("Switching to state: ", nextState)
+			log.Println("Switching to state: ", nextState, time.Now().UnixMilli())
 			currentState = nextState
 			config.Behaviors[currentState].Entered(&s)
 		}
@@ -231,6 +227,7 @@ func Run(config MachineConfig) chan struct{} {
 			}
 
 			if s.TimeoutCh == nil {
+				// log.Println("Starting timeout")
 				s.TimeoutCh = time.After(util.RandomTimeout(config.MinTimeout, config.MaxTimeout))
 			}
 
@@ -238,22 +235,30 @@ func Run(config MachineConfig) chan struct{} {
 			// log.Println("pending client requests", pendingClientRequests)
 			select {
 			case r := <-serviceAgent.RequestVoteCh:
-				if r.Args.Term < s.CurrentTerm || currentState == 2 || s.VotedFor != "" {
+				d := time.Now().Sub(s.LastTime)
+				if d < time.Duration(config.MinTimeout)*time.Millisecond {
+					log.Println("We have a leader")
 					r.ReplyCh <- &service.RequestVoteReply{
 						Term:        s.CurrentTerm,
 						VoteGranted: false,
 					}
 				} else {
-					pendingVoteRequests = append(pendingVoteRequests, &r)
+					checkTerm(r.Args.Term)
+					reply := requestVoteHandler(r.Args, &s, config.MinTimeout)
+					if reply.VoteGranted {
+						s.LastTime = time.Now()
+						log.Println("Vote granted for term to: ", s.CurrentTerm, s.VotedFor)
+						nextState = config.Behaviors[currentState].GrantedVote()
+					}
+					r.ReplyCh <- reply
 				}
 			case r := <-serviceAgent.AppendEntriesCh:
-				// log.Println("Responding to AppendEntries from ", r.Args.LeaderId)
+				// log.Println("Responding to AppendEntries from ", r.Args.LeaderId, time.Now().UnixMilli())
 				reply := appendEntriesHandler(r.Args, &s)
 				checkTerm(r.Args.Term)
 
-				if r.Args.Term >= s.CurrentTerm {
-					go purgePendingVotes(pendingVoteRequests, s.CurrentTerm)
-					pendingVoteRequests = make([]*service.RequestVoteMessage, 0)
+				if s.CurrentTerm <= r.Args.Term {
+					s.LastTime = time.Now()
 					nextState = config.Behaviors[currentState].AppendEntries()
 				}
 				r.ReplyCh <- reply
@@ -272,10 +277,10 @@ func Run(config MachineConfig) chan struct{} {
 					})
 				}
 			case r := <-serviceAgent.AddServerCh:
-				log.Println("Received add server request: ", r.Args.NewServer)
+				// log.Println("Received add server request: ", r.Args.NewServer)
 				config.Behaviors[currentState].AddServer(r)
 			case r := <-serviceAgent.RemoveServerCh:
-				log.Println("Received remove server request: ", r.Args.NewServer)
+				// log.Println("Received remove server request: ", r.Args.NewServer)
 				config.Behaviors[currentState].RemoveServer(r)
 			case r := <-requestVoteReplyCh:
 				checkTerm(r.Reply.Term)
@@ -284,29 +289,10 @@ func Run(config MachineConfig) chan struct{} {
 				checkTerm(r.Reply.Term)
 				nextState = config.Behaviors[currentState].AppendEntriesReply(r)
 			case <-s.TimeoutCh:
-				// log.Println("Timeout")
-				if currentState == 2 {
-					purgePendingVotes(pendingVoteRequests, s.CurrentTerm)
-					pendingVoteRequests = make([]*service.RequestVoteMessage, 0)
-				}
-				if len(pendingVoteRequests) > 0 {
-					log.Println("Responding to votes")
-					r := pendingVoteRequests[0]
-					pendingVoteRequests = pendingVoteRequests[1:]
-					checkTerm(r.Args.Term)
-					reply := requestVoteHandler(r.Args, &s)
-					if reply.VoteGranted {
-						log.Println("Vote granted for term to: ", s.CurrentTerm, s.VotedFor)
-						nextState = config.Behaviors[currentState].GrantedVote()
-					}
-					r.ReplyCh <- reply
-				}
 				s.TimeoutCh = nil
 				nextState = config.Behaviors[currentState].Timeout()
 			case index := <-logAppliedCh:
-				// log.Printf("Log applied for index %d\n", index)
 				for ; len(pendingClientRequests) > 0 && pendingClientRequests[0].logIndex <= index; pendingClientRequests = pendingClientRequests[1:] {
-					// log.Println("Notifying client")
 					pendingClientRequests[0].replyCh <- &service.ClientCommandReply{
 						Leader:    "",
 						LastIndex: pendingClientRequests[0].logIndex,
@@ -348,8 +334,6 @@ func Run(config MachineConfig) chan struct{} {
 						if _, ok := s.Peers[e]; !ok {
 							log.Println("Added new peer", e)
 							s.MakePeer(e)
-							s.NextIndex[e] = int64(len(s.Log))
-							s.MatchIndex[e] = 0
 						}
 					}
 
@@ -361,6 +345,8 @@ func Run(config MachineConfig) chan struct{} {
 							delete(s.MatchIndex, e)
 						}
 					}
+
+					s.Servers = em
 				}
 				lastChecked++
 			}
@@ -387,10 +373,9 @@ func Run(config MachineConfig) chan struct{} {
 
 					if adding {
 						s.MakePeer(endpoint)
-						s.NextIndex[endpoint] = int64(len(s.Log))
-						s.MatchIndex[endpoint] = 0
 					} else {
 						delete(s.Peers, endpoint)
+						delete(s.Servers, endpoint)
 						delete(s.NextIndex, endpoint)
 						delete(s.MatchIndex, endpoint)
 					}
