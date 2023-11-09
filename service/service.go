@@ -51,7 +51,7 @@ func (r AppendEntriesReply) GetTerm() int64 {
 }
 
 type ClientCommandArgs struct {
-	Command string
+	Command []string
 }
 
 type ClientCommandReply struct {

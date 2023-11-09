@@ -3,6 +3,7 @@ package machine
 import (
 	"log"
 	"raft/peer"
+	"raft/persistence"
 	"raft/service"
 	"raft/state"
 	"raft/util"
@@ -17,6 +18,7 @@ type MachineConfig struct {
 	MaxTimeout int64
 	Behaviors  []state.StateBehavior
 	AgentId    string
+	StateDir   string
 }
 
 type RpcRequestResponse interface {
@@ -56,6 +58,8 @@ func requestVoteHandler(args *service.RequestVoteArgs, state *state.State, minTi
 		state.VotedFor = args.CandidateId
 	}
 
+	state.SaveState()
+
 	return reply
 }
 
@@ -70,7 +74,7 @@ func appendEntriesHandler(args *service.AppendEntriesArgs, state *state.State) *
 	reply := &service.AppendEntriesReply{
 		Term:      state.CurrentTerm,
 		Success:   false,
-		LogLength: int64(len(state.Log) - 1),
+		LogLength: state.LogLen(),
 	}
 
 	if args.Term < state.CurrentTerm {
@@ -87,6 +91,7 @@ func appendEntriesHandler(args *service.AppendEntriesArgs, state *state.State) *
 
 	if state.Log[args.PrevLogIndex].Term != args.PrevLogTerm {
 		log.Println("The previous log's term does not match mine")
+		reply.LogLength = args.PrevLogIndex - 1
 		return reply
 	}
 
@@ -101,26 +106,27 @@ func appendEntriesHandler(args *service.AppendEntriesArgs, state *state.State) *
 		}
 		if index >= int64(len(state.Log)) {
 			// log.Println("Appending logs")
-			state.Log = append(state.Log, entries...)
+			state.AddLogs(entries...)
 			break
 		} else if state.Log[index].Term != entries[0].Term {
-			// log.Println("Truncating logs!")
-			state.Log = state.Log[:index]
+			state.TruncateLogs(index)
 		} else {
-			// log.Println("Replacing log at ", index)
-			state.Log[index] = entries[0]
-			entries = entries[1:]
-			index++
+			if state.Log[index].Term != entries[0].Term {
+				state.TruncateLogs(index)
+			} else {
+				entries = entries[1:]
+				index++
+			}
 		}
 	}
 
-	reply.LogLength = int64(len(state.Log) - 1)
-
 	if args.LeaderCommit > state.CommitIndex {
-		newCommitIndex := min(args.LeaderCommit, reply.LogLength)
 		// log.Printf("Updating leader commit from %d to %d\n", state.CommitIndex, newCommitIndex)
+		newCommitIndex := min(args.LeaderCommit, state.LogLen())
 		state.CommitIndex = newCommitIndex
 	}
+
+	state.SaveState()
 
 	return reply
 }
@@ -137,7 +143,6 @@ func processLogs(input chan service.Entry, output chan int64, index int64) {
 		index++
 
 		// log.Printf("Processed log #%d: %s\n", index, e.Command)
-
 		if strings.HasPrefix(e.Command, "print") {
 			log.Println("Logs", logs)
 		}
@@ -151,7 +156,10 @@ func processLogs(input chan service.Entry, output chan int64, index int64) {
 
 func Run(config MachineConfig) chan struct{} {
 	done := make(chan struct{})
+
 	go func() {
+		persistence := persistence.NewGobPersistence(config.StateDir, config.AgentId)
+		defer persistence.Close()
 		applyLogCh := make(chan service.Entry)
 		logAppliedCh := make(chan int64)
 		requestVoteReplyCh := make(chan peer.RequestVoteReplyMessage)
@@ -174,7 +182,11 @@ func Run(config MachineConfig) chan struct{} {
 			LogRequestCh:   make(chan state.LogRequest),
 			AgentId:        config.AgentId,
 			Servers:        make(map[string]bool),
+			StateDir:       config.StateDir,
+			Persistence:    persistence,
 		}
+
+		s.LoadState()
 
 		s.MakePeer = func(endpoint string) {
 			s.Peers[endpoint] = peer.MakePeer(endpoint, requestVoteReplyCh, appendEntriesReplyCh)
@@ -214,12 +226,12 @@ func Run(config MachineConfig) chan struct{} {
 				log.Printf("Greater term than ours: leader %d follower %d\n", term, s.CurrentTerm)
 				s.CurrentTerm = term
 				nextState = 0
+				// follower will save the updated term as well
 				changeState()
 			}
 		}
 
-		configIndex := 0
-		lastChecked := 0
+		lastChecked := int64(s.ConfigIndex)
 
 		for !finished {
 			if nextState != currentState {
@@ -286,6 +298,7 @@ func Run(config MachineConfig) chan struct{} {
 				checkTerm(r.Reply.Term)
 				nextState = config.Behaviors[currentState].RequestVoteReply(r)
 			case r := <-appendEntriesReplyCh:
+
 				checkTerm(r.Reply.Term)
 				nextState = config.Behaviors[currentState].AppendEntriesReply(r)
 			case <-s.TimeoutCh:
@@ -317,13 +330,13 @@ func Run(config MachineConfig) chan struct{} {
 				finished = true
 			}
 
-			for lastChecked < len(s.Log) {
+			for lastChecked < s.LogLen() {
 				if strings.HasPrefix(s.Log[lastChecked].Command, "config") {
-					configIndex = lastChecked
+					s.ConfigIndex = lastChecked
 				}
 
-				if configIndex > 0 && configIndex == lastChecked {
-					endpoints := strings.Split(strings.Split(s.Log[configIndex].Command, " ")[1], ",")
+				if s.ConfigIndex > 0 && s.ConfigIndex == lastChecked {
+					endpoints := strings.Split(strings.Split(s.Log[s.ConfigIndex].Command, " ")[1], ",")
 					log.Println("Applying new configuration", endpoints)
 					em := make(map[string]bool)
 					for _, e := range endpoints {
@@ -352,7 +365,7 @@ func Run(config MachineConfig) chan struct{} {
 			}
 
 			if currentState == 2 {
-				if int64(configIndex) <= s.CommitIndex {
+				if int64(s.ConfigIndex) <= s.CommitIndex {
 					if uncomittedAddServerRequest != nil {
 						// log.Println("Replying to server request")
 						if uncomittedAddServerRequest.Action == "REMOVE" && uncomittedAddServerRequest.Endpoint == config.AgentId {

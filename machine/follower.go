@@ -16,6 +16,7 @@ func (f *Follower) Entered(state *state.State) {
 	f.notTimedOut = false
 	f.state = state
 	state.VotedFor = ""
+	state.SaveState()
 	log.Println("Reverting to follower for term: ", state.CurrentTerm)
 }
 
@@ -51,7 +52,7 @@ func (f *Follower) Timeout() int64 {
 	return 1
 }
 
-func (f *Follower) ClientCommand(command string) int64 {
+func (f *Follower) ClientCommand(command []string) int64 {
 	return -1
 }
 

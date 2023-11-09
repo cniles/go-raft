@@ -25,6 +25,8 @@ func (c *Candidate) startElection() {
 	// Vote for self
 	c.state.VotedFor = c.CandidateId
 
+	c.state.SaveState()
+
 	// Cause machine to reset timeout
 	c.state.TimeoutCh = nil
 	log.Println("Starting election as ", c.CandidateId, c.state.CurrentTerm, time.Now().UnixMilli())
@@ -92,7 +94,7 @@ func (c *Candidate) Timeout() int64 {
 	return 1
 }
 
-func (c *Candidate) ClientCommand(command string) int64 {
+func (c *Candidate) ClientCommand(command []string) int64 {
 	return -1
 }
 

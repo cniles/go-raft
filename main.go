@@ -2,9 +2,11 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/rpc"
+	"os"
 	"raft/machine"
 	"raft/service"
 	"raft/state"
@@ -36,6 +38,11 @@ var maxTimeout = flag.Int("T", 3000, "maximum timeout")
 var command = flag.String("C", "", "Invoke an RPC")
 var server = flag.String("S", ":9990", "server to connect to")
 var message = flag.String("m", "hello world", "message to append")
+var batchSize = flag.Int("b", 100, "size of client batches for benchmarking")
+
+var total = flag.Int("r", 75000, "total number of benchmark requests")
+var clients = flag.Int("l", 50, "number of clients for benchmark")
+var stateDir = flag.String("d", os.Getenv("HOME")+string(os.PathSeparator)+".goraft", "location to store state (logs, etc)")
 
 var endpointsFlag = flag.String("c", "", "comma separated list of agent endpoints (hostname:port)")
 
@@ -71,6 +78,7 @@ func doServer() {
 				TimeoutFactor: 0.1,
 			},
 		},
+		StateDir: *stateDir,
 	}
 
 	machine.Run(config)
@@ -80,7 +88,7 @@ func doServer() {
 
 }
 
-func clientCommand(command string, client *rpc.Client) string {
+func clientCommand(command []string, client *rpc.Client) string {
 	reply := &service.ClientCommandReply{}
 	args := &service.ClientCommandArgs{
 		Command: command,
@@ -162,16 +170,26 @@ func doCommands(count int, clientNum int, done chan struct{}) {
 		log.Fatal("Could not dial client")
 	}
 	defer client.Close()
-	for j := 0; j < count; j++ {
-		clientCommand("log "+strconv.FormatInt(int64(j), 10)+" "+strconv.FormatInt(int64(clientNum), 10), client)
+	for j := 0; j < count / *batchSize; j++ {
+		for {
+			commands := make([]string, *batchSize)
+			for b := 0; b < *batchSize; b++ {
+				commands[b] = fmt.Sprintf("log %d %d %d", j, clientNum, b)
+			}
+			leader := clientCommand(commands, client)
+			if leader == "" {
+				break
+			}
+			client, err = rpc.DialHTTP("tcp", leader)
+		}
 	}
 	log.Printf("Client %d done", clientNum)
 	done <- struct{}{}
 }
 
 func benchmark() {
-	total := 75000
-	clients := 50
+	total := *total
+	clients := *clients
 	count := total / clients
 	done := make(chan struct{})
 	for i := 0; i < clients; i++ {
@@ -194,7 +212,7 @@ func doClient() {
 
 		switch *command {
 		case "clientcommand":
-			leader = clientCommand(*message, client)
+			leader = clientCommand([]string{*message}, client)
 		case "addserver":
 			leader = addServer(*message, client)
 		case "removeserver":

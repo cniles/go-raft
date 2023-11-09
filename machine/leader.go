@@ -22,10 +22,6 @@ type Leader struct {
 	state *state.State
 }
 
-type ILeader interface {
-	updateFollowers()
-}
-
 type ByMatch []int64
 
 func (m ByMatch) Len() int           { return len(m) }
@@ -35,7 +31,7 @@ func (m ByMatch) Less(i, j int) bool { return m[i] > m[j] }
 type AppendEntriesArgCh chan *service.AppendEntriesArgs
 
 func (l *Leader) updateFollower(endpoint string, nextIndex int64) {
-	lastLogIndex := int64(len(l.state.Log)) - 1
+	lastLogIndex := l.state.LogLen()
 	peer := l.state.Peers[endpoint]
 	args := &service.AppendEntriesArgs{
 		Term:         l.state.CurrentTerm,
@@ -95,7 +91,7 @@ func (l *Leader) Entered(state *state.State) {
 	l.state.MatchIndex = make(map[string]int64)
 	l.state.NextIndex = make(map[string]int64)
 	l.appending = make(map[string]bool)
-	lastLogIndex := int64(len(l.state.Log) - 1)
+	lastLogIndex := l.state.LogLen()
 	for endpoint := range l.state.Peers {
 		l.state.NextIndex[endpoint] = lastLogIndex + 1
 		l.state.MatchIndex[endpoint] = 0
@@ -119,10 +115,10 @@ func (l *Leader) RequestVoteReply(message peer.RequestVoteReplyMessage) int64 {
 }
 
 func (l *Leader) AppendEntriesReply(message peer.AppendEntriesReplyMessage) int64 {
-	lastLogIndex := int64(len(l.state.Log) - 1)
+	lastLogIndex := l.state.LogLen()
 	l.appending[message.Endpoint] = false
 
-	l.state.NextIndex[message.Endpoint] = message.Reply.LogLength + 1
+	l.state.NextIndex[message.Endpoint] = min(message.Reply.LogLength+1, l.state.LogLen()+1)
 	if message.Reply.Success {
 		l.state.MatchIndex[message.Endpoint] = message.Reply.LogLength
 
@@ -139,6 +135,7 @@ func (l *Leader) AppendEntriesReply(message peer.AppendEntriesReplyMessage) int6
 		if N > l.state.CommitIndex && l.state.Log[N].Term == l.state.CurrentTerm {
 			// log.Println("Leader has committed up to ", N)
 			l.state.CommitIndex = N
+			l.state.SaveState()
 		}
 	}
 
@@ -154,15 +151,21 @@ func (l *Leader) Timeout() int64 {
 	return 2
 }
 
-func (l *Leader) ClientCommand(command string) int64 {
-	l.state.Log = append(l.state.Log, service.Entry{
-		Term:    l.state.CurrentTerm,
-		Command: command,
-	})
+func (l *Leader) ClientCommand(commands []string) int64 {
+	entries := make([]service.Entry, 0)
+
+	for _, command := range commands {
+		entries = append(entries, service.Entry{
+			Term:    l.state.CurrentTerm,
+			Command: command,
+		})
+	}
+
+	l.state.AddLogs(entries...)
 
 	l.updateFollowers()
 
-	return int64(len(l.state.Log) - 1)
+	return l.state.LogLen()
 }
 
 type roundConfig struct {

@@ -1,7 +1,9 @@
 package state
 
 import (
+	"log"
 	"raft/peer"
+	"raft/persistence"
 	"raft/service"
 	"time"
 )
@@ -26,7 +28,7 @@ type StateBehavior interface {
 	RequestVoteReply(message peer.RequestVoteReplyMessage) int64
 	AppendEntriesReply(message peer.AppendEntriesReplyMessage) int64
 
-	ClientCommand(command string) int64
+	ClientCommand(command []string) int64
 
 	AddServer(message service.AddServerMessage)
 	RemoveServer(message service.RemoveServerMessage)
@@ -42,6 +44,7 @@ type State struct {
 
 	CommitIndex int64
 	LastApplied int64
+	ConfigIndex int64
 
 	// leader only
 
@@ -59,6 +62,8 @@ type State struct {
 	// when muxing in events.
 	TimeoutCh <-chan time.Time
 
+	StateDir string
+
 	LogRequestCh chan LogRequest
 
 	ServerChangeCh chan ServerChangeRequest
@@ -66,4 +71,38 @@ type State struct {
 	MakePeer func(endpoint string)
 
 	LastTime time.Time
+
+	Persistence persistence.Persistence
+}
+
+func (s *State) LogLen() int64 {
+	return int64(len(s.Log)) - 1
+}
+
+func (s *State) AddLogs(entries ...service.Entry) {
+	s.Persistence.AddLogs(entries...)
+	s.Log = append(s.Log, entries...)
+}
+
+func (s *State) SaveState() {
+	s.Persistence.SaveState(persistence.SavedState{
+		CurrentTerm: s.CurrentTerm,
+		VotedFor:    s.VotedFor,
+		CommitIndex: s.CommitIndex,
+	})
+}
+
+func (s *State) LoadState() {
+	s.Log = append(s.Log, s.Persistence.ReadLogs()...)
+	ls := s.Persistence.ReadState()
+	log.Println("Loaded logs ", s.LogLen())
+	s.CommitIndex = ls.CommitIndex
+	s.CurrentTerm = ls.CurrentTerm
+	s.VotedFor = ls.VotedFor
+	log.Println("Loaded state ", ls)
+}
+
+func (s *State) TruncateLogs(index int64) {
+	s.Log = s.Log[:index]
+	s.Persistence.Truncate(index)
 }
