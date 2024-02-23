@@ -278,6 +278,7 @@ func Run(config MachineConfig) chan struct{} {
 				// log.Println("Received client command: ", r.Args.Command)
 				index := config.Behaviors[currentState].ClientCommand(r.Args.Command)
 				if index == -1 {
+					// If we aren't the leader, hint who the leader may be
 					r.ReplyCh <- &service.ClientCommandReply{
 						Leader:    s.Leader,
 						LastIndex: index,
