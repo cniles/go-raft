@@ -31,6 +31,7 @@ type Entry struct {
 }
 
 var portFlag = flag.Int("p", 9990, "the port to listen on")
+var hostname = flag.String("h", "", "the hostname (part of agent id)")
 
 var minTimeout = flag.Int("t", 2500, "minimum timeout")
 var maxTimeout = flag.Int("T", 3000, "maximum timeout")
@@ -60,7 +61,8 @@ func doServer() {
 
 	log.Println(endpoints)
 
-	agentId := ":" + strconv.FormatInt(int64(*portFlag), 10)
+	agentId := *hostname + ":" + strconv.FormatInt(int64(*portFlag), 10)
+	log.Println(agentId)
 
 	config := machine.MachineConfig{
 		AgentId:    agentId,
